@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280">
+<title>评论雷达 · TikTok 直播间评论采集系统</title>
+<style>
+:root {
+  --primary: #fe2c55;
+  --primary-dark: #d61f44;
+  --bg: #0f0f13;
+  --panel: #1a1a21;
+  --panel2: #23232b;
+  --border: #2e2e38;
+  --text: #f1f1f3;
+  --text2: #9a9aa5;
+  --reply: #ff3b5c;
+  --green: #22c55e;
+  --blue: #3b82f6;
+  --orange: #f59e0b;
+  --gold: #eab308;
+  --gray: #6b7280;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "PingFang SC","Microsoft YaHei",sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.6;
+  height: 100vh; overflow: hidden; display: flex;
+}
+
+/* ===== 侧边栏 ===== */
+.sidebar { width: 200px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; height: 100vh; }
+.sidebar-brand { padding: 20px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; }
+.sidebar-brand .logo { font-size: 24px; }
+.sidebar-brand .sub { font-size: 11px; color: var(--text2); font-weight: 400; }
+.sidebar-nav { flex: 1; padding: 12px 10px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text2); transition: .15s; margin-bottom: 4px; }
+.nav-item:hover { background: var(--panel2); color: var(--text); }
+.nav-item.active { background: rgba(254,44,85,.12); color: var(--primary); font-weight: 600; }
+.nav-item .nav-ico { font-size: 16px; width: 20px; text-align: center; }
+
+/* ===== 主区 ===== */
+.main-wrap { flex: 1; display: flex; flex-direction: column; height: 100vh; min-width: 0; }
+.topbar { height: 56px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 24px; justify-content: space-between; }
+.topbar .page-title { font-size: 16px; font-weight: 700; }
+.topbar-right { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--text2); }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 1.5s infinite; display: inline-block; margin-right: 4px; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,.5); } 50% { box-shadow: 0 0 0 6px rgba(34,197,94,0); } }
+
+.content { flex: 1; overflow-y: auto; padding: 24px; }
+.content::-webkit-scrollbar { width: 8px; }
+.content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.view { display: none; }
+.view.active { display: block; }
+
+/* 子 tab */
+.sub-tabs { display: flex; gap: 4px; background: var(--panel2); border-radius: 10px; padding: 4px; margin-bottom: 20px; width: fit-content; }
+.sub-tab { padding: 8px 24px; border-radius: 7px; cursor: pointer; font-size: 14px; color: var(--text2); transition: .2s; }
+.sub-tab.active { background: var(--primary); color: #fff; font-weight: 600; }
+.sub-tab:hover:not(.active) { color: var(--text); }
+
+/* 统计概览卡 */
+.stat-cards { display: flex; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+.stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; flex: 1; min-width: 150px; }
+.stat-card .label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.stat-card .value { font-size: 26px; font-weight: 800; }
+.stat-card .value.green { color: var(--green); }
+.stat-card .value.red { color: var(--reply); }
+.stat-card .value.gold { color: var(--gold); }
+
+/* 卡片网格 */
+.section { margin-bottom: 24px; }
+.section .sec-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px; cursor: pointer; transition: .2s; }
+.card:hover { border-color: var(--primary); transform: translateY(-2px); }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.card-name { font-size: 15px; font-weight: 700; }
+.badge { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 12px; }
+.badge.live { background: rgba(34,197,94,.15); color: var(--green); }
+.badge.ended { background: rgba(107,114,128,.15); color: var(--gray); }
+.card-stats { display: flex; gap: 16px; font-size: 12px; color: var(--text2); }
+.card-stats .stat { display: flex; flex-direction: column; }
+.card-stats .stat .num { font-size: 16px; font-weight: 700; color: var(--text); }
+.card-stats .stat .num.hl { color: var(--reply); }
+.card-foot { margin-top: 12px; font-size: 11px; color: var(--text2); }
+
+/* 直播间选择列表（实时监控第一层） */
+.room-list { display: flex; flex-direction: column; gap: 10px; max-width: 700px; }
+.room-list-item { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: .2s; }
+.room-list-item:hover { border-color: var(--primary); }
+.room-list-item .cover { font-size: 28px; }
+.room-list-item .info { flex: 1; }
+.room-list-item .info .name { font-size: 15px; font-weight: 700; }
+.room-list-item .info .meta { font-size: 12px; color: var(--text2); }
+.room-list-item .arrow { color: var(--text2); font-size: 18px; }
+
+/* 评论流 */
+.comment-stream { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; height: calc(100vh - 280px); }
+.stream-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.stream-header .title { font-weight: 700; font-size: 15px; }
+.stream-header .sub { font-size: 12px; color: var(--text2); }
+.stream-header .ctrl { display: flex; gap: 8px; align-items: center; }
+.stream-body { flex: 1; overflow-y: auto; padding: 16px; scroll-behavior: smooth; }
+.stream-body::-webkit-scrollbar { width: 6px; }
+.stream-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.comment-item { background: var(--panel2); border-radius: 10px; padding: 11px 16px; margin-bottom: 10px; position: relative; animation: slideIn .35s ease; border-left: 3px solid transparent; }
+.comment-item.need-reply { border-left-color: var(--reply); background: rgba(255,59,92,.06); }
+@keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+.comment-top { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.comment-id { font-weight: 600; font-size: 13px; color: var(--blue); }
+.comment-time { font-size: 11px; color: var(--text2); margin-left: auto; }
+.reply-badge { background: var(--reply); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px 4px 4px 0; position: relative; }
+.reply-badge::after { content: ''; position: absolute; top: 0; right: -4px; width: 0; height: 0; border-top: 4px solid var(--reply); border-right: 4px solid transparent; }
+.comment-content { font-size: 14px; color: var(--text); word-break: break-word; }
+
+/* 复盘/分析 */
+.analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.analysis-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px; min-height: 300px; }
+.analysis-card .card-title { font-size: 15px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.analysis-card .card-title .icon { font-size: 18px; }
+.wordcloud { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; justify-content: center; min-height: 220px; padding: 10px; }
+.wordcloud .word { transition: .2s; cursor: default; font-weight: 700; }
+.wordcloud .word:hover { transform: scale(1.1); }
+.pie-wrap { display: flex; align-items: center; gap: 24px; justify-content: center; }
+.legend { display: flex; flex-direction: column; gap: 10px; }
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.legend-item .dot { width: 10px; height: 10px; border-radius: 3px; }
+.legend-item .pct { color: var(--text2); font-size: 12px; margin-left: auto; }
+.sentiment-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; font-size: 13px; }
+.sentiment-row .name { width: 40px; }
+.sentiment-track { flex: 1; height: 14px; background: var(--panel2); border-radius: 7px; overflow: hidden; }
+.sentiment-fill { height: 100%; border-radius: 7px; transition: width .6s ease; }
+.sentiment-row .num { width: 50px; text-align: right; color: var(--text2); }
+.issue-list { display: flex; flex-direction: column; gap: 12px; }
+.issue-item { background: var(--panel2); border-radius: 10px; padding: 14px 16px; }
+.issue-item .issue-q { font-weight: 700; font-size: 14px; color: var(--orange); margin-bottom: 4px; }
+.issue-item .issue-desc { font-size: 13px; color: var(--text2); }
+.issue-item .issue-count { display: inline-block; background: rgba(245,158,11,.15); color: var(--orange); font-size: 11px; padding: 2px 10px; border-radius: 10px; margin-left: 8px; }
+
+/* 设置 */
+.setting-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.setting-row:last-child { border-bottom: none; }
+.setting-row .label-main { font-size: 14px; font-weight: 600; }
+.setting-row .label-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.toggle { width: 44px; height: 24px; background: #4a4a55; border-radius: 12px; cursor: pointer; position: relative; transition: .2s; }
+.toggle.on { background: var(--primary); }
+.toggle::after { content: ''; position: absolute; width: 20px; height: 20px; background: #fff; border-radius: 50%; top: 2px; left: 2px; transition: .2s; }
+.toggle.on::after { left: 22px; }
+
+.btn { padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); cursor: pointer; font-size: 13px; transition: .2s; }
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn.primary:hover { background: var(--primary-dark); color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- 侧边栏 -->
+<aside class="sidebar">
+  <div class="sidebar-brand"><span class="logo">🎥</span><div>评论雷达<div class="sub">TikTok 评论采集</div></div></div>
+  <nav class="sidebar-nav">
+    <div class="nav-item active" data-nav="overview" onclick="goNav('overview')"><span class="nav-ico">📊</span>总览</div>
+    <div class="nav-item" data-nav="monitor" onclick="goNav('monitor')"><span class="nav-ico">🔴</span>实时监控</div>
+    <div class="nav-item" data-nav="analytics" onclick="goNav('analytics')"><span class="nav-ico">📈</span>数据分析</div>
+    <div class="nav-item" data-nav="settings" onclick="goNav('settings')"><span class="nav-ico">⚙️</span>系统设置</div>
+  </nav>
+</aside>
+
+<!-- 主区 -->
+<div class="main-wrap">
+  <div class="topbar">
+    <div class="page-title" id="pageTitle">总览</div>
+    <div class="topbar-right"><span><span class="live-dot"></span>采集中</span><span id="clock"></span></div>
+  </div>
+
+  <div class="content">
+
+    <!-- ===== 总览 ===== -->
+    <div class="view active" id="view-overview">
+      <div class="stat-cards">
+        <div class="stat-card"><div class="label">直播间总数</div><div class="value" id="statTotalRooms">5</div></div>
+        <div class="stat-card"><div class="label">实时监控中</div><div class="value green" id="statLiveRooms">2</div></div>
+        <div class="stat-card"><div class="label">累计评论</div><div class="value" id="statTotalComments">17,628</div></div>
+        <div class="stat-card"><div class="label">累计用户数</div><div class="value gold" id="statTotalUsers">4,348</div></div>
+      </div>
+      <div class="section">
+        <div class="sec-title"><span class="live-dot"></span>直播中 <span style="font-size:12px;color:var(--text2);font-weight:400;">点击进入实时监控</span></div>
+        <div class="grid" id="liveRooms"></div>
+      </div>
+      <div class="section">
+        <div class="sec-title">⚪ 已结束 <span style="font-size:12px;color:var(--text2);font-weight:400;">点击查看历史与复盘</span></div>
+        <div class="grid" id="endedRooms"></div>
+      </div>
+      <div class="section">
+        <div class="sec-title">🌐 全网评论风向 <span style="font-size:12px;color:var(--text2);font-weight:400;">所有直播间评论总和</span></div>
+        <div class="analysis-grid">
+          <div class="analysis-card"><div class="card-title"><span class="icon">☁️</span>全网高频关键词</div><div class="wordcloud" id="overviewWordcloud"></div></div>
+          <div class="analysis-card"><div class="card-title"><span class="icon">🥧</span>全网意向分布</div><div class="pie-wrap"><svg id="overviewPieSvg" width="200" height="200" viewBox="0 0 200 200"></svg><div class="legend" id="overviewPieLegend"></div></div></div>
+          <div class="analysis-card" style="grid-column: 1 / -1;"><div class="card-title"><span class="icon">😊</span>全网舆论情绪</div><div id="overviewSentiment"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 实时监控 ===== -->
+    <div class="view" id="view-monitor">
+      <!-- 第一层：直播间选择 -->
+      <div id="monitor-list">
+        <div class="sec-title" style="margin-bottom:16px;">选择直播间</div>
+        <div class="room-list" id="roomList"></div>
+      </div>
+      <!-- 第二层：直播间详情 -->
+      <div id="monitor-detail" style="display:none;">
+        <div class="crumb" style="margin-bottom:16px;font-size:13px;">
+          <a style="color:var(--blue);cursor:pointer;" onclick="backToRoomList()">← 直播间选择</a>
+          <span style="color:var(--text2);margin-left:8px;" id="monitorRoomName"></span>
+        </div>
+        <div class="sub-tabs">
+          <div class="sub-tab active" id="tab-comments" onclick="switchSubTab('comments', this)">💬 评论</div>
+          <div class="sub-tab" id="tab-review" onclick="switchSubTab('review', this)">📊 评论总结</div>
+        </div>
+        <div id="sub-comments">
+          <div class="stat-cards" id="roomStats"></div>
+          <div class="comment-stream">
+            <div class="stream-header">
+              <div><div class="title" id="streamTitle">评论区</div><div class="sub" id="streamSub"></div></div>
+              <div class="ctrl" id="streamCtrl">
+                <button class="btn" id="pauseBtn" onclick="togglePause()">⏸️ 暂停</button>
+                <button class="btn primary" onclick="manualRefresh()">🔄 刷新</button>
+              </div>
+            </div>
+            <div class="stream-body" id="streamBody"></div>
+          </div>
+        </div>
+        <div id="sub-review" style="display:none;">
+          <div class="analysis-grid">
+            <div class="analysis-card"><div class="card-title"><span class="icon">☁️</span>高频关键词 TOP10</div><div class="wordcloud" id="wordcloud"></div></div>
+            <div class="analysis-card"><div class="card-title"><span class="icon">🥧</span>意向分类占比</div><div class="pie-wrap"><svg id="pieSvg" width="200" height="200" viewBox="0 0 200 200"></svg><div class="legend" id="pieLegend"></div></div></div>
+            <div class="analysis-card"><div class="card-title"><span class="icon">😊</span>评论区整体情绪</div><div id="sentimentBar"></div></div>
+            <div class="analysis-card"><div class="card-title"><span class="icon">💡</span>问题集中点</div><div class="issue-list" id="issueList"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 数据分析（整体舆论风向） ===== -->
+    <div class="view" id="view-analytics">
+      <div class="stat-cards">
+        <div class="stat-card"><div class="label">分析评论总量</div><div class="value">17,628</div></div>
+        <div class="stat-card"><div class="label">整体情绪</div><div class="value green">偏正面</div></div>
+        <div class="stat-card"><div class="label">核心意向</div><div class="value gold">购买意向</div></div>
+        <div class="stat-card"><div class="label">待优化问题</div><div class="value red">4</div></div>
+      </div>
+      <div class="analysis-grid">
+        <div class="analysis-card"><div class="card-title"><span class="icon">☁️</span>全网高频关键词</div><div class="wordcloud" id="globalWordcloud"></div></div>
+        <div class="analysis-card"><div class="card-title"><span class="icon">🥧</span>整体意向分布</div><div class="pie-wrap"><svg id="globalPieSvg" width="200" height="200" viewBox="0 0 200 200"></svg><div class="legend" id="globalPieLegend"></div></div></div>
+        <div class="analysis-card"><div class="card-title"><span class="icon">😊</span>整体舆论情绪</div><div id="globalSentiment"></div></div>
+        <div class="analysis-card"><div class="card-title"><span class="icon">🏪</span>各直播间舆论对比</div><div id="roomCompare"></div></div>
+      </div>
+    </div>
+
+    <!-- ===== 系统设置 ===== -->
+    <div class="view" id="view-settings">
+      <div class="analysis-card" style="max-width:700px;">
+        <div class="card-title"><span class="icon">⚙️</span>系统设置</div>
+        <div class="setting-row"><div><div class="label-main">实时评论自动刷新</div><div class="label-sub">直播间评论自动滚动刷新</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="setting-row"><div><div class="label-main">AI 需回复标签</div><div class="label-sub">开启后 AI 自动标记需回复评论</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="setting-row"><div><div class="label-main">复盘分析自动生成</div><div class="label-sub">直播结束后自动生成复盘报告</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="setting-row"><div><div class="label-main">飞书/企微推送</div><div class="label-sub">重要异常实时推送提醒</div></div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+        <div class="setting-row"><div><div class="label-main">评论采集频率</div><div class="label-sub">AI 分析评论的时间间隔</div></div><select style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);"><option>实时</option><option>每30秒</option><option>每1分钟</option></select></div>
+        <div class="setting-row"><div><div class="label-main">语言支持</div><div class="label-sub">评论多语言翻译与分类</div></div><span style="font-size:13px;color:var(--text2);">越南语 · 泰语 · 印尼语 · 英语</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ===== 全局状态 ===== */
+let currentNav = 'overview';
+let currentRoomId = null;
+let currentSubTab = 'comments';
+let paused = false;
+let liveTimer = null;
+
+/* ===== 数据 ===== */
+const liveRooms = [
+  { id: 'PH01TGFE', name: 'PH01TGFE', cover: '💄', online: 1284, comments: 5477, needReply: 123, uniqueUsers: 1628, startedAt: '18:00' },
+  { id: 'PH02TKMO', name: 'PH02TKMO', cover: '📱', online: 856, comments: 6946, needReply: 89, uniqueUsers: 2610, startedAt: '17:30' },
+];
+const endedRooms = [
+  { id: 'TH01KMOG', name: 'TH01KMOG', cover: '👗', comments: 253, needReply: 21, uniqueUsers: 110, endedAt: '2026-08-24 16:00', duration: '2h30m' },
+  { id: 'TH02XTRH', name: 'TH02XTRH', cover: '🧴', comments: 1832, needReply: 156, uniqueUsers: 700, endedAt: '2026-08-23 21:30', duration: '3h15m' },
+  { id: 'TH03MZKU', name: 'TH03MZKU', cover: '👜', comments: 3120, needReply: 245, uniqueUsers: 1200, endedAt: '2026-08-23 18:00', duration: '4h00m' },
+];
+const allRooms = [...liveRooms, ...endedRooms];
+
+const allComments = [
+  { id: 'anna_tran', content: '这款多少钱？可以优惠吗？', needReply: true },
+  { id: 'happy_user', content: '主播好美啊！😍', needReply: false },
+  { id: 'kevin_nguyen', content: '现在下单多久能发货？', needReply: true },
+  { id: 'lurker_99', content: '666666', needReply: false },
+  { id: 'linh_pham', content: '有蓝色款吗？我想要蓝色的', needReply: true },
+  { id: 'passer_by', content: '路过看看～', needReply: false },
+  { id: 'mike_lee', content: '已经买了！主播看下我的订单', needReply: true },
+  { id: 'emoji_fan', content: '❤️❤️❤️', needReply: false },
+  { id: 'sophie', content: '可以分期付款吗？', needReply: true },
+  { id: 'silent_watch', content: '这个之前买过，质量不错', needReply: false },
+  { id: 'john_chen', content: '越南本地能发货吗？运费多少？', needReply: true },
+  { id: 'just_viewing', content: '第一次来，看看', needReply: false },
+  { id: 'emily_wang', content: '这个尺码表在哪看？', needReply: true },
+  { id: 'david', content: '两个一起买有折扣吗？', needReply: true },
+  { id: 'thao_vo', content: '主播试穿一下M码可以吗', needReply: true },
+  { id: 'peter_kim', content: '什么时候补货？上次没抢到', needReply: true },
+];
+
+const wordcloudData = [
+  { text: '多少钱', size: 48, color: '#ff6b81' }, { text: '发货', size: 42, color: '#ffa502' },
+  { text: '尺码', size: 38, color: '#70a1ff' }, { text: '颜色', size: 34, color: '#2ed573' },
+  { text: '优惠', size: 30, color: '#eccc68' }, { text: '库存', size: 28, color: '#a29bfe' },
+  { text: '物流', size: 26, color: '#fd79a8' }, { text: '质量', size: 24, color: '#00cec9' },
+  { text: '复购', size: 22, color: '#fdcb6e' }, { text: '退换', size: 20, color: '#e17055' },
+];
+const intentData = [
+  { name: '购买意向', value: 38, color: '#22c55e' }, { name: '产品咨询', value: 27, color: '#3b82f6' },
+  { name: '物流咨询', value: 18, color: '#f59e0b' }, { name: '好评复购', value: 12, color: '#eab308' },
+  { name: '负面反馈', value: 5, color: '#ef4444' },
+];
+const sentimentData = [
+  { name: '正面', value: 72, color: '#22c55e' }, { name: '中性', value: 21, color: '#9aa0a6' },
+  { name: '负面', value: 7, color: '#ef4444' },
+];
+const issueData = [
+  { q: '大家都在问「发货时间」', desc: '48条评论涉及发货时效，建议直播中明确发货承诺', count: 48 },
+  { q: '大家都在问「尺码选择」', desc: '35条评论询问尺码，建议准备尺码对照表', count: 35 },
+  { q: '大家都在问「优惠活动」', desc: '29条评论询问折扣，可考虑上架组合优惠', count: 29 },
+  { q: '大家都在问「库存情况」', desc: '12条评论担心缺货，建议预告补货时间', count: 12 },
+];
+
+/* ===== 导航 ===== */
+const navTitles = { overview: '总览', monitor: '实时监控', analytics: '数据分析', settings: '系统设置' };
+function goNav(nav) {
+  currentNav = nav;
+  stopLiveStream();
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.nav === nav));
+  document.getElementById('pageTitle').textContent = navTitles[nav];
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + nav).classList.add('active');
+  if (nav === 'overview') renderOverview();
+  if (nav === 'monitor') renderMonitor();
+  if (nav === 'analytics') renderAnalytics();
+}
+function highlightNav(nav) { goNav(nav); }
+
+/* ===== 总览 ===== */
+function renderOverview() {
+  // 顶部统计卡（动态计算）
+  const totalComments = allRooms.reduce((s, r) => s + r.comments, 0);
+  document.getElementById('statTotalRooms').textContent = allRooms.length;
+  document.getElementById('statLiveRooms').textContent = liveRooms.length;
+  document.getElementById('statTotalComments').textContent = totalComments.toLocaleString();
+  document.getElementById('statTotalUsers').textContent = '4,348'; // 全网去重用户数
+
+  let liveHtml = liveRooms.map(r => `
+    <div class="card" onclick="enterRoom('${r.id}')">
+      <div class="card-head"><span class="card-name">${r.cover} ${r.name}</span><span class="badge live">🟢 直播中</span></div>
+      <div class="card-stats">
+        <div class="stat"><span>在线人数</span><span class="num" style="color:var(--green);">${r.online}</span></div>
+        <div class="stat"><span>累计用户</span><span class="num">${r.uniqueUsers}</span></div>
+        <div class="stat"><span>评论总数</span><span class="num">${r.comments}</span></div>
+      </div>
+      <div class="card-foot">开播于 ${r.startedAt}</div>
+    </div>`).join('');
+  let endedHtml = endedRooms.map(r => `
+    <div class="card" onclick="enterRoom('${r.id}')">
+      <div class="card-head"><span class="card-name">${r.cover} ${r.name}</span><span class="badge ended">⚪ 已结束</span></div>
+      <div class="card-stats">
+        <div class="stat"><span>累计用户</span><span class="num">${r.uniqueUsers}</span></div>
+        <div class="stat"><span>评论总数</span><span class="num">${r.comments}</span></div>
+        <div class="stat"><span>时长</span><span class="num">${r.duration}</span></div>
+      </div>
+      <div class="card-foot">结束于 ${r.endedAt}</div>
+    </div>`).join('');
+  document.getElementById('liveRooms').innerHTML = liveHtml;
+  document.getElementById('endedRooms').innerHTML = endedHtml;
+
+  // 全网评论风向分析区块
+  renderWordcloud('overviewWordcloud', wordcloudData);
+  renderPie('overviewPieSvg', 'overviewPieLegend', intentData);
+  renderSentiment('overviewSentiment', sentimentData);
+}
+
+/* ===== 实时监控 ===== */
+function renderMonitor() {
+  // 显示直播间选择列表
+  document.getElementById('monitor-list').style.display = 'block';
+  document.getElementById('monitor-detail').style.display = 'none';
+  currentRoomId = null;
+
+  let html = '';
+  allRooms.forEach(r => {
+    const live = liveRooms.some(l => l.id === r.id);
+    html += `<div class="room-list-item" onclick="enterRoom('${r.id}')">
+      <span class="cover">${r.cover}</span>
+      <div class="info">
+        <div class="name">${r.name}</div>
+        <div class="meta">${live ? `🟢 直播中 · 在线 ${r.online} 人` : `⚪ 已结束 · ${r.endedAt}`} · 评论 ${r.comments} 条 · 需回复 ${r.needReply}</div>
+      </div>
+      <span class="arrow">›</span>
+    </div>`;
+  });
+  document.getElementById('roomList').innerHTML = html;
+}
+
+function enterRoom(roomId) {
+  currentRoomId = roomId;
+  const room = allRooms.find(r => r.id === roomId);
+  document.getElementById('monitor-list').style.display = 'none';
+  document.getElementById('monitor-detail').style.display = 'block';
+  document.getElementById('monitorRoomName').textContent = room.cover + ' ' + room.name;
+  switchSubTab('comments');
+  renderRoom(room);
+}
+
+function backToRoomList() {
+  stopLiveStream();
+  renderMonitor();
+}
+
+function isLive(roomId) { return liveRooms.some(r => r.id === roomId); }
+
+function renderRoom(room) {
+  const live = isLive(room.id);
+  let statsHtml = live ? `
+    <div class="stat-card"><div class="label">状态</div><div class="value green">🟢 直播中</div></div>
+    <div class="stat-card"><div class="label">实时在线</div><div class="value green">${room.online}</div></div>
+    <div class="stat-card"><div class="label">需回复评论</div><div class="value red">${room.needReply}</div></div>
+    <div class="stat-card"><div class="label">评论总数</div><div class="value">${room.comments}</div></div>` :
+    `<div class="stat-card"><div class="label">状态</div><div class="value" style="color:var(--gray);">⚪ 已结束</div></div>
+    <div class="stat-card"><div class="label">直播时长</div><div class="value">${room.duration}</div></div>
+    <div class="stat-card"><div class="label">需回复评论</div><div class="value red">${room.needReply}</div></div>
+    <div class="stat-card"><div class="label">评论总数</div><div class="value">${room.comments}</div></div>`;
+  document.getElementById('roomStats').innerHTML = statsHtml;
+
+  document.getElementById('streamTitle').textContent = live ? '评论区 · 实时' : '评论区 · 历史回放';
+  document.getElementById('streamSub').textContent = live
+    ? '按时间顺序实时刷新，红色角标为 AI 标记需回复'
+    : '已结束直播间的全部评论（静态回放）';
+  document.getElementById('streamCtrl').style.display = live ? 'flex' : 'none';
+  document.getElementById('streamBody').innerHTML = '';
+
+  if (live) { stopLiveStream(); startLiveStream(); }
+  else renderStaticComments(room);
+}
+
+function renderStaticComments(room) {
+  const body = document.getElementById('streamBody');
+  const count = Math.min(room.comments, 25);
+  let html = '';
+  for (let i = 0; i < count; i++) {
+    const c = allComments[i % allComments.length];
+    const time = `18:${String(10 + i).padStart(2, '0')}:${String((i*7)%60).padStart(2, '0')}`;
+    html += `<div class="comment-item ${c.needReply ? 'need-reply' : ''}">
+      <div class="comment-top"><span class="comment-id">@${c.id}</span>${c.needReply ? '<span class="reply-badge">需回复</span>' : ''}<span class="comment-time">${time}</span></div>
+      <div class="comment-content">${c.content}</div></div>`;
+  }
+  body.innerHTML = html;
+}
+
+/* ===== 实时评论流 ===== */
+function addComment() {
+  const item = allComments[Math.floor(Math.random() * allComments.length)];
+  const time = new Date().toTimeString().slice(0, 8);
+  const body = document.getElementById('streamBody');
+  const div = document.createElement('div');
+  div.className = 'comment-item' + (item.needReply ? ' need-reply' : '');
+  div.innerHTML = `<div class="comment-top"><span class="comment-id">@${item.id}</span>${item.needReply ? '<span class="reply-badge">需回复</span>' : ''}<span class="comment-time">${time}</span></div><div class="comment-content">${item.content}</div>`;
+  body.appendChild(div);
+  while (body.children.length > 40) body.removeChild(body.firstChild);
+  if (!paused) body.scrollTop = body.scrollHeight;
+}
+function togglePause() {
+  paused = !paused;
+  document.getElementById('pauseBtn').textContent = paused ? '▶️ 继续' : '⏸️ 暂停';
+  if (!paused) document.getElementById('streamBody').scrollTop = document.getElementById('streamBody').scrollHeight;
+}
+function manualRefresh() { addComment(); setTimeout(addComment, 300); setTimeout(addComment, 600); }
+function startLiveStream() {
+  for (let i = 0; i < 6; i++) setTimeout(() => addComment(), i * 250);
+  liveTimer = setInterval(() => addComment(), 3000);
+}
+function stopLiveStream() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
+
+/* ===== 子 Tab ===== */
+function switchSubTab(tab, el) {
+  currentSubTab = tab;
+  document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  else document.getElementById('tab-' + tab).classList.add('active');
+  document.getElementById('sub-comments').style.display = tab === 'comments' ? 'block' : 'none';
+  document.getElementById('sub-review').style.display = tab === 'review' ? 'block' : 'none';
+  if (tab === 'review') { stopLiveStream(); renderReview(); }
+  else if (tab === 'comments' && currentRoomId && isLive(currentRoomId)) { stopLiveStream(); startLiveStream(); }
+}
+
+/* ===== 单直播间复盘 ===== */
+function renderReview() {
+  renderWordcloud('wordcloud', wordcloudData);
+  renderPie('pieSvg', 'pieLegend', intentData);
+  renderSentiment('sentimentBar', sentimentData);
+  renderIssues('issueList', issueData);
+}
+
+/* ===== 数据分析（全局） ===== */
+function renderAnalytics() {
+  renderWordcloud('globalWordcloud', wordcloudData);
+  renderPie('globalPieSvg', 'globalPieLegend', intentData);
+  renderSentiment('globalSentiment', sentimentData);
+  renderRoomCompare();
+}
+function renderRoomCompare() {
+  const el = document.getElementById('roomCompare');
+  el.innerHTML = allRooms.map(r => {
+    const pos = 60 + Math.floor(Math.random() * 35);
+    const neg = Math.floor(Math.random() * 12);
+    const neu = 100 - pos - neg;
+    return `<div style="margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px;">${r.cover} ${r.name}</div>
+      <div class="sentiment-track" style="display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--panel2);">
+        <div style="width:${pos}%;background:#22c55e;"></div>
+        <div style="width:${neu}%;background:#9aa0a6;"></div>
+        <div style="width:${neg}%;background:#ef4444;"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px;">正面 ${pos}% · 中性 ${neu}% · 负面 ${neg}%</div>
+    </div>`;
+  }).join('');
+}
+
+/* ===== 通用渲染 ===== */
+function renderWordcloud(id, data) {
+  document.getElementById(id).innerHTML = data.map(w =>
+    `<span class="word" style="font-size:${w.size}px;color:${w.color};">${w.text}</span>`).join('');
+}
+function renderPie(svgId, legendId, data) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  let startAngle = -90; const cx = 100, cy = 100, r = 80;
+  let paths = '', legend = '';
+  data.forEach(d => {
+    const angle = (d.value / total) * 360;
+    const endAngle = startAngle + angle;
+    const largeArc = angle > 180 ? 1 : 0;
+    const x1 = cx + r * Math.cos(startAngle * Math.PI / 180);
+    const y1 = cy + r * Math.sin(startAngle * Math.PI / 180);
+    const x2 = cx + r * Math.cos(endAngle * Math.PI / 180);
+    const y2 = cy + r * Math.sin(endAngle * Math.PI / 180);
+    paths += `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${largeArc} 1 ${x2},${y2} Z" fill="${d.color}" stroke="#1a1a21" stroke-width="2"/>`;
+    legend += `<div class="legend-item"><span class="dot" style="background:${d.color}"></span><span>${d.name}</span><span class="pct">${d.value}%</span></div>`;
+    startAngle = endAngle;
+  });
+  document.getElementById(svgId).innerHTML = paths;
+  document.getElementById(legendId).innerHTML = legend;
+}
+function renderSentiment(id, data) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  document.getElementById(id).innerHTML = data.map(d => {
+    const pct = Math.round(d.value / total * 100);
+    return `<div class="sentiment-row"><span class="name">${d.name}</span><div class="sentiment-track"><div class="sentiment-fill" style="width:${pct}%;background:${d.color};"></div></div><span class="num">${pct}%</span></div>`;
+  }).join('');
+}
+function renderIssues(id, data) {
+  document.getElementById(id).innerHTML = data.map(i => `
+    <div class="issue-item"><div class="issue-q">❓ ${i.q}<span class="issue-count">${i.count}条</span></div><div class="issue-desc">${i.desc}</div></div>`).join('');
+}
+
+/* ===== 时钟 ===== */
+function updateClock() { document.getElementById('clock').textContent = new Date().toTimeString().slice(0, 8); }
+
+/* ===== 初始化 ===== */
+renderOverview();
+updateClock();
+setInterval(updateClock, 1000);
+</script>
+</body>
+</html>
